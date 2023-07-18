@@ -11,64 +11,65 @@ import (
 	"github.com/PuerkitoBio/goquery"
 )
 
-// bookmark represents a bookmark entry in the tree.
+// bookmark represents a bookmark entry with its title, URL, parent, and sub-bookmarks.
 type Bookmark struct {
 	Title     string     `json:"title"`
 	URL       string     `json:"url,omitempty"`
-	Parent    string     `json:"-"`
+	Parent    string     `json:"-"` // parent field is not included in JSON serialization.
 	Bookmarks []Bookmark `json:"bookmarks,omitempty"`
 	AddAt     *time.Time `json:"addAt,omitempty"`
 	UpdateAt  *time.Time `json:"updateAt,omitempty"`
 }
 
 func main() {
-	// read the HTML file containing bookmarks data
+	// read the HTML file containing the bookmarks data.
 	htmlBytes, err := ioutil.ReadFile("bookmarks.html")
 	if err != nil {
-		fmt.Printf("Error reading file: %s\n", err.Error())
+		fmt.Printf("error reading file: %s\n", err.Error())
 		return
 	}
 
-	// parse the HTML content using goquery
+	// parse the HTML using goquery library.
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(htmlBytes)))
 	if err != nil {
-		fmt.Printf("Error parsing HTML: %s\n", err.Error())
+		fmt.Printf("error parsing HTML: %s\n", err.Error())
 		return
 	}
 
-	// parse the bookmarks data from the HTML
+	// extract bookmarks data from the HTML and create the bookmark tree.
 	bookmarks := parseBookmarks(doc)
-
-	// build the tree structure from the parsed bookmarks
 	tree := buildTree(bookmarks)
 
-	// convert the tree to JSON format
+	// convert the bookmark tree to JSON and print the result.
 	jsonData, err := json.Marshal(tree)
 	if err != nil {
-		fmt.Printf("Error converting to JSON: %s\n", err.Error())
+		fmt.Printf("error converting to JSON: %s\n", err.Error())
 		return
 	}
-
-	// print the JSON data
 	fmt.Println(string(jsonData))
 }
 
-// parseBookmarks extracts bookmarks from the goquery document and returns them as a slice of Bookmark objects.
+// parseBookmarks extracts bookmarks from the goquery document and returns a slice of bookmark entries.
 func parseBookmarks(doc *goquery.Document) []Bookmark {
+	// initialize a slice to store the extracted bookmarks.
 	bookmarks := make([]Bookmark, 0, doc.Find("H3").Length())
+
+	// iterate over each H3 element in the document representing bookmark titles.
 	doc.Find("H3").Each(func(i int, header *goquery.Selection) {
+		// create a bookmark entry for the current H3 element.
 		bookmark := Bookmark{
 			Title:    header.Text(),
 			AddAt:    parseTime(header.AttrOr("add_date", "")),
 			UpdateAt: parseTime(header.AttrOr("last_modified", "")),
 		}
 
-		// Find the DL element containing bookmark entries
+		// check if the header has a sibling DL element containing bookmarks.
 		if dlNode := header.Next(); dlNode.Is("DL") {
+			// initialize a slice to store the sub-bookmarks.
 			bookmarks := make([]Bookmark, 0, dlNode.ChildrenFiltered("DT").Length())
-
 			dlNode.ChildrenFiltered("DT").Each(func(j int, dtNode *goquery.Selection) {
 				if aNode := dtNode.Children().First(); aNode.Is("A") {
+					// create a bookmark entry for each bookmark within the DL element.
 					bookmark := Bookmark{
 						Title:    aNode.Text(),
 						URL:      aNode.AttrOr("href", ""),
@@ -78,37 +79,52 @@ func parseBookmarks(doc *goquery.Document) []Bookmark {
 					bookmarks = append(bookmarks, bookmark)
 				}
 			})
+			// set the sub-bookmarks for the current bookmark.
 			bookmark.Bookmarks = bookmarks
 		}
 
-		// Find the parent folder title if it exists
+		// check if the bookmark has a parent folder (H3 element).
 		if parentDL := header.Parent().Parent(); parentDL.Is("DL") && parentDL.Prev().Is("H3") {
+			// set the parent field for the current bookmark.
 			bookmark.Parent = parentDL.Prev().Text()
 		}
+
+		// add the bookmark to the bookmarks slice.
 		bookmarks = append(bookmarks, bookmark)
 	})
 	return bookmarks
 }
 
-// parseTime converts ADD_DATE attribute value to time.Time.
+// parseTime converts a timestamp string to a time.Time pointer.
 func parseTime(timestamp string) *time.Time {
 	if len(timestamp) == 0 {
 		return nil
 	}
 	ts, err := strconv.ParseInt(timestamp, 10, 64)
 	if err != nil {
-		fmt.Println("Error parsing timestamp:", err.Error())
+		fmt.Println("error parsing timestamp:", err.Error())
 		return nil
 	}
 	t := time.Unix(ts, 0)
 	return &t
 }
 
-// buildTree constructs the tree of bookmarks from the flat bookmarks slice.
+// buildTree constructs the bookmark tree by finding the root folder and building the sub-trees.
 func buildTree(bookmarks []Bookmark) Bookmark {
+	// function to find the root folder by looking for a bookmark without a parent.
+	findRootFolder := func(bookmarks []Bookmark) *Bookmark {
+		for i := range bookmarks {
+			if bookmarks[i].Parent == "" {
+				return &bookmarks[i]
+			}
+		}
+		return nil
+	}
+
+	// find the root folder and build the sub-trees recursively.
 	root := findRootFolder(bookmarks)
 	if root == nil {
-		fmt.Println("Root folder not found")
+		fmt.Println("root folder not found")
 		return Bookmark{}
 	}
 	buildSubTree(root, bookmarks)
@@ -116,17 +132,7 @@ func buildTree(bookmarks []Bookmark) Bookmark {
 	return *root
 }
 
-// findRootFolder finds and returns the root folder in the bookmarks slice.
-func findRootFolder(bookmarks []Bookmark) *Bookmark {
-	for i := range bookmarks {
-		if bookmarks[i].Parent == "" {
-			return &bookmarks[i]
-		}
-	}
-	return nil
-}
-
-// buildSubTree recursively builds the subtree of bookmarks starting from the given parent folder.
+// buildSubTree recursively builds the sub-tree under the parent bookmark.
 func buildSubTree(parent *Bookmark, bookmarks []Bookmark) {
 	for i := range bookmarks {
 		if bookmarks[i].Parent == parent.Title {
