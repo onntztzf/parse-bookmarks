@@ -51,8 +51,22 @@ func main() {
 
 // parseBookmarks extracts bookmarks from the goquery document and returns a slice of bookmark entries.
 func parseBookmarks(doc *goquery.Document) []Bookmark {
-	// initialize a slice to store the extracted bookmarks.
-	bookmarks := make([]Bookmark, 0, doc.Find("H3").Length())
+	// initialize a map to store bookmarks with their titles as keys.
+	bookmarkMap := make(map[string]*Bookmark)
+
+	// helper function to parse timestamp.
+	parseTime := func(timestamp string) *time.Time {
+		if len(timestamp) == 0 {
+			return nil
+		}
+		ts, err := strconv.ParseInt(timestamp, 10, 64)
+		if err != nil {
+			fmt.Println("error parsing timestamp:", err.Error())
+			return nil
+		}
+		t := time.Unix(ts, 0)
+		return &t
+	}
 
 	// iterate over each H3 element in the document representing bookmark titles.
 	doc.Find("H3").Each(func(i int, header *goquery.Selection) {
@@ -65,22 +79,19 @@ func parseBookmarks(doc *goquery.Document) []Bookmark {
 
 		// check if the header has a sibling DL element containing bookmarks.
 		if dlNode := header.Next(); dlNode.Is("DL") {
-			// initialize a slice to store the sub-bookmarks.
-			bookmarks := make([]Bookmark, 0, dlNode.ChildrenFiltered("DT").Length())
+			// iterate over each DT element representing sub-bookmark titles.
 			dlNode.ChildrenFiltered("DT").Each(func(j int, dtNode *goquery.Selection) {
 				if aNode := dtNode.Children().First(); aNode.Is("A") {
 					// create a bookmark entry for each bookmark within the DL element.
-					bookmark := Bookmark{
+					subBookmark := Bookmark{
 						Title:    aNode.Text(),
 						URL:      aNode.AttrOr("href", ""),
 						AddAt:    parseTime(aNode.AttrOr("add_date", "")),
 						UpdateAt: parseTime(aNode.AttrOr("last_modified", "")),
 					}
-					bookmarks = append(bookmarks, bookmark)
+					bookmark.Bookmarks = append(bookmark.Bookmarks, subBookmark)
 				}
 			})
-			// set the sub-bookmarks for the current bookmark.
-			bookmark.Bookmarks = bookmarks
 		}
 
 		// check if the bookmark has a parent folder (H3 element).
@@ -89,24 +100,16 @@ func parseBookmarks(doc *goquery.Document) []Bookmark {
 			bookmark.Parent = parentDL.Prev().Text()
 		}
 
-		// add the bookmark to the bookmarks slice.
-		bookmarks = append(bookmarks, bookmark)
+		// add the bookmark to the map.
+		bookmarkMap[bookmark.Title] = &bookmark
 	})
-	return bookmarks
-}
 
-// parseTime converts a timestamp string to a time.Time pointer.
-func parseTime(timestamp string) *time.Time {
-	if len(timestamp) == 0 {
-		return nil
+	// convert the map values to a slice and return.
+	bookmarks := make([]Bookmark, 0, len(bookmarkMap))
+	for _, bookmark := range bookmarkMap {
+		bookmarks = append(bookmarks, *bookmark)
 	}
-	ts, err := strconv.ParseInt(timestamp, 10, 64)
-	if err != nil {
-		fmt.Println("error parsing timestamp:", err.Error())
-		return nil
-	}
-	t := time.Unix(ts, 0)
-	return &t
+	return bookmarks
 }
 
 // buildTree constructs the bookmark tree by finding the root folder and building the sub-trees.
@@ -121,23 +124,24 @@ func buildTree(bookmarks []Bookmark) Bookmark {
 		return nil
 	}
 
-	// find the root folder and build the sub-trees recursively.
 	root := findRootFolder(bookmarks)
 	if root == nil {
 		fmt.Println("root folder not found")
 		return Bookmark{}
 	}
-	buildSubTree(root, bookmarks)
 
-	return *root
-}
-
-// buildSubTree recursively builds the sub-tree under the parent bookmark.
-func buildSubTree(parent *Bookmark, bookmarks []Bookmark) {
-	for i := range bookmarks {
-		if bookmarks[i].Parent == parent.Title {
-			parent.Bookmarks = append(parent.Bookmarks, bookmarks[i])
-			buildSubTree(&parent.Bookmarks[len(parent.Bookmarks)-1], bookmarks)
+	// function to build the sub-tree recursively.
+	var buildSubTree func(parent *Bookmark)
+	buildSubTree = func(parent *Bookmark) {
+		for i := range bookmarks {
+			if bookmarks[i].Parent == parent.Title {
+				parent.Bookmarks = append(parent.Bookmarks, bookmarks[i])
+				buildSubTree(&parent.Bookmarks[len(parent.Bookmarks)-1])
+			}
 		}
 	}
+
+	// build the sub-tree for the root folder.
+	buildSubTree(root)
+	return *root
 }
