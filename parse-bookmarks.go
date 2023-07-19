@@ -23,7 +23,7 @@ type Bookmark struct {
 
 func main() {
 	// read the HTML file containing the bookmarks data.
-	htmlBytes, err := ioutil.ReadFile("bookmarks.html")
+	htmlBytes, err := ioutil.ReadFile("bookmarks_test1.html")
 	if err != nil {
 		fmt.Printf("error reading file: %s\n", err.Error())
 		return
